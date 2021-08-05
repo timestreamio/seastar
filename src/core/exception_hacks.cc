@@ -112,7 +112,9 @@ extern "C"
 [[gnu::visibility("default")]]
 [[gnu::used]]
 [[gnu::no_sanitize_address]]
-int dl_iterate_phdr(int (*callback) (struct dl_phdr_info *info, size_t size, void *data), void *data) {
+// TP starts: fix dup symbols issue as in libunwind
+int dl_iterate_phdr_st(int (*callback) (struct dl_phdr_info *info, size_t size, void *data), void *data) {
+// TP ends
     if (!seastar::local_engine || !seastar::phdrs_cache) {
         // Cache is not yet populated, pass through to original function
         return seastar::dl_iterate_phdr_org()(callback, data);
@@ -135,7 +137,9 @@ int dl_iterate_phdr(int (*callback) (struct dl_phdr_info *info, size_t size, voi
 extern "C"
 [[gnu::visibility("default")]]
 [[gnu::used]]
-int _Unwind_RaiseException(struct _Unwind_Exception *h) {
+// TP starts: fix dup symbols issue as in libunwind
+int _Unwind_RaiseException_ST(struct _Unwind_Exception *h) {
+// TP ends
     using throw_fn =  int (*)(void *);
     static throw_fn org = nullptr;
 
