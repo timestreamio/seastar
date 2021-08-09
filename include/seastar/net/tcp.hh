@@ -41,9 +41,10 @@
 #include <stdexcept>
 #include <system_error>
 
-// TP FIXME
+// TP starts: remove crytopp depencency 
 // #define CRYPTOPP_ENABLE_NAMESPACE_WEAK 1
-// #include <cryptopp/md5.h>
+#include <openssl/md5.h>
+// TP ends
 
 namespace seastar {
 
@@ -2058,14 +2059,23 @@ tcp_seq tcp<InetTraits>::tcb::get_isn() {
     //   ISN = M + F(localip, localport, remoteip, remoteport, secretkey)
     //   M is the 4 microsecond timer
     using namespace std::chrono;
-    uint32_t hash[4];
-    hash[0] = _local_ip.ip;
-    hash[1] = _foreign_ip.ip;
-    hash[2] = (_local_port << 16) + _foreign_port;
-    hash[3] = _isn_secret.key[15];
-    // TP FIXME
+    // TP starts: remove cryptopp dependency 
+    // uint32_t hash[4];
+    // hash[0] = _local_ip.ip;
+    // hash[1] = _foreign_ip.ip;
+    // hash[2] = (_local_port << 16) + _foreign_port;
+    // hash[3] = _isn_secret.key[15];
     // CryptoPP::Weak::MD5::Transform(hash, _isn_secret.key);
-    auto seq = hash[0];
+    // auto seq = hash[0];
+    MD5_CTX md5_ctx;
+    MD5_Init(&md5_ctx);
+    md5_ctx.h[0] = _local_ip.ip;
+    md5_ctx.h[1] = _foreign_ip.ip;
+    md5_ctx.h[2] = (_local_port << 16) + _foreign_port;
+    md5_ctx.h[3] = _isn_secret.key[15];
+    MD5_Transform(&md5_ctx, reinterpret_cast<uint8_t*>(_isn_secret.key));
+    auto seq = md5_ctx.h[0];
+    // TP ends
     auto m = duration_cast<microseconds>(clock_type::now().time_since_epoch());
     seq += m.count() / 4;
     return make_seq(seq);
