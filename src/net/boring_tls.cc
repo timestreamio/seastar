@@ -19,9 +19,9 @@
  * Copyright 2015 Cloudius Systems
  */
 
-#ifndef TP_BUILD // TP starts: boaringssl
-#include <gnutls/gnutls.h>
-#include <gnutls/x509.h>
+#ifdef TP_BUILD
+
+#include <openssl/x509.h>
 #include <system_error>
 
 #include <seastar/core/loop.hh>
@@ -53,22 +53,18 @@ public:
     }
 };
 
-class blob_wrapper: public gnutls_datum_t {
+class blob_wrapper {
 public:
-    blob_wrapper(const tls::blob& in)
-            : gnutls_datum_t {
-                    reinterpret_cast<uint8_t *>(const_cast<char *>(in.data())),
-                    unsigned(in.size()) } {
-    }
+    blob_wrapper(const tls::blob& in) {}
 };
 
 class gnutlsinit {
 public:
     gnutlsinit() {
-        gnutls_global_init();
+        /*gnutls_global_init();*/
     }
     ~gnutlsinit() {
-        gnutls_global_deinit();
+        /*gnutls_global_deinit();*/
     }
 };
 
@@ -132,7 +128,7 @@ public:
         return "GnuTLS";
     }
     std::string message(int error) const {
-        return gnutls_strerror(error);
+        return "xxx";
     }
 };
 
@@ -159,87 +155,19 @@ static auto get_gtls_string = [](auto func, auto... args) noexcept {
     size_t size = 0;
     int ret = func(args..., nullptr, &size);
 
-    // by construction, we expect the SHORT_MEMORY_BUFFER error code here
-    if (ret != GNUTLS_E_SHORT_MEMORY_BUFFER) {
-        return std::make_pair(ret, sstring{});
-    }
-    assert(size != 0);
     sstring res(sstring::initialized_later{}, size - 1);
-    ret = func(args..., res.data(), &size);
     return std::make_pair(ret, res);
 };
 
 }
 
 class tls::dh_params::impl : gnutlsobj {
-    static gnutls_sec_param_t to_gnutls_level(level l) {
-        switch (l) {
-            case level::LEGACY: return GNUTLS_SEC_PARAM_LEGACY;
-#if GNUTLS_VERSION_NUMBER >= 0x030300
-            case level::MEDIUM: return GNUTLS_SEC_PARAM_MEDIUM;
-#else
-            case level::MEDIUM: return GNUTLS_SEC_PARAM_NORMAL;
-#endif
-            case level::HIGH: return GNUTLS_SEC_PARAM_HIGH;
-            case level::ULTRA: return GNUTLS_SEC_PARAM_ULTRA;
-            default:
-                throw std::runtime_error(format("Unknown value of dh_params::level: {:d}", static_cast<std::underlying_type_t<level>>(l)));
-        }
-    }
-    using dh_ptr = std::unique_ptr<std::remove_pointer_t<gnutls_dh_params_t>, void(*)(gnutls_dh_params_t)>;
-
-    static dh_ptr new_dh_params() {
-        gnutls_dh_params_t params;
-        gtls_chk(gnutls_dh_params_init(&params));
-        return dh_ptr(params, &gnutls_dh_params_deinit);
-    }
 public:
-    impl(dh_ptr p) 
-        : _params(std::move(p)) 
-    {}
-    impl(level lvl)
-#if GNUTLS_VERSION_NUMBER >= 0x030506
-        : _params(nullptr, &gnutls_dh_params_deinit)
-        , _sec_param(to_gnutls_level(lvl))
-#else        
-        : impl([&] {
-            auto bits = gnutls_sec_param_to_pk_bits(GNUTLS_PK_DH, to_gnutls_level(lvl));
-            auto ptr = new_dh_params();
-            gtls_chk(gnutls_dh_params_generate2(ptr.get(), bits));
-            return ptr;
-        }())
-#endif
-    {}
-    impl(const blob& pkcs3, x509_crt_format fmt)
-        : impl([&] {
-            auto ptr = new_dh_params();
-            blob_wrapper w(pkcs3);
-            gtls_chk(gnutls_dh_params_import_pkcs3(ptr.get(), &w, gnutls_x509_crt_fmt_t(fmt)));
-            return ptr;
-        }()) 
-    {}
-    impl(const impl& v)
-        : impl([&v] {
-            auto ptr = new_dh_params();
-            gtls_chk(gnutls_dh_params_cpy(ptr.get(), v));
-            return ptr;
-        }()) 
-    {}
+    impl() {}
+    impl(level lvl) {}
+    impl(const blob& pkcs3, x509_crt_format fmt) {}
+    impl(const impl& v) {}
     ~impl() = default;
-
-    operator gnutls_dh_params_t() const {
-        return _params.get();
-    }
-#if GNUTLS_VERSION_NUMBER >= 0x030506
-    std::optional<gnutls_sec_param_t> sec_param() const {
-        return _sec_param;
-    }
-#endif
-private:
-    dh_ptr _params;
-#if GNUTLS_VERSION_NUMBER >= 0x030506
-    std::optional<gnutls_sec_param_t> _sec_param;
-#endif
 };
 
 tls::dh_params::dh_params(level lvl) : _impl(std::make_unique<impl>(lvl))
@@ -264,30 +192,11 @@ future<tls::dh_params> tls::dh_params::from_file(
 
 class tls::x509_cert::impl : gnutlsobj {
 public:
-    impl()
-            : _cert([] {
-                gnutls_x509_crt_t cert;
-                gtls_chk(gnutls_x509_crt_init(&cert));
-                return cert;
-            }()) {
-    }
-    impl(const blob& b, x509_crt_format fmt)
-        : impl()
-    {
-        blob_wrapper w(b);
-        gtls_chk(gnutls_x509_crt_import(*this, &w, gnutls_x509_crt_fmt_t(fmt)));
-    }
-    ~impl() {
-        if (_cert != nullptr) {
-            gnutls_x509_crt_deinit(_cert);
-        }
-    }
-    operator gnutls_x509_crt_t() const {
-        return _cert;
-    }
+    impl() {}
+    impl(const blob& b, x509_crt_format fmt) : impl() {}
+    ~impl() {}
 
 private:
-    gnutls_x509_crt_t _cert;
 };
 
 tls::x509_cert::x509_cert(shared_ptr<impl> impl)
@@ -307,67 +216,28 @@ future<tls::x509_cert> tls::x509_cert::from_file(
 
 class tls::certificate_credentials::impl: public gnutlsobj {
 public:
-    impl()
-            : _creds([] {
-                gnutls_certificate_credentials_t xcred;
-                gnutls_certificate_allocate_credentials(&xcred);
-                if (xcred == nullptr) {
-                    throw std::bad_alloc();
-                }
-                return xcred;
-            }()), _priority(nullptr, &gnutls_priority_deinit)
-    {}
-    ~impl() {
-        if (_creds != nullptr) {
-            gnutls_certificate_free_credentials (_creds);
-        }
-    }
-
-    operator gnutls_certificate_credentials_t() const {
-        return _creds;
-    }
+    impl() {}
+    ~impl() {}
 
     void set_x509_trust(const blob& b, x509_crt_format fmt) {
         blob_wrapper w(b);
-        gtls_chk(
-                gnutls_certificate_set_x509_trust_mem(_creds, &w,
-                        gnutls_x509_crt_fmt_t(fmt)));
     }
     void set_x509_crl(const blob& b, x509_crt_format fmt) {
         blob_wrapper w(b);
-        gtls_chk(
-                gnutls_certificate_set_x509_crl_mem(_creds, &w,
-                        gnutls_x509_crt_fmt_t(fmt)));
     }
     void set_x509_key(const blob& cert, const blob& key, x509_crt_format fmt) {
         blob_wrapper w1(cert);
         blob_wrapper w2(key);
-        gtls_chk(
-                gnutls_certificate_set_x509_key_mem(_creds, &w1, &w2,
-                        gnutls_x509_crt_fmt_t(fmt)));
     }
     void set_simple_pkcs12(const blob& b, x509_crt_format fmt,
             const sstring& password) {
         blob_wrapper w(b);
-        gtls_chk(
-                gnutls_certificate_set_x509_simple_pkcs12_mem(_creds, &w,
-                        gnutls_x509_crt_fmt_t(fmt), password.c_str()));
     }
     void dh_params(const tls::dh_params& dh) {
-#if GNUTLS_VERSION_NUMBER >= 0x030506
-        auto sec_param = dh._impl->sec_param();
-        if (sec_param) {
-            gnutls_certificate_set_known_dh_params(*this, *sec_param);
-            return;
-        }
-#endif
-        auto cpy = std::make_unique<tls::dh_params::impl>(*dh._impl);
-        gnutls_certificate_set_dh_params(*this, *cpy);
-        _dh_params = std::move(cpy);
     }
+
     future<> set_system_trust() {
         return async([this] {
-            gtls_chk(gnutls_certificate_set_x509_system_trust(_creds));
             _load_system_trust = false; // should only do once, for whatever reason
         });
     }
@@ -380,17 +250,10 @@ public:
     void set_priority_string(const sstring& prio) {
         const char * err = prio.c_str();
         try {
-            gnutls_priority_t p;
-            gtls_chk(gnutls_priority_init(&p, prio.c_str(), &err));
-            _priority.reset(p);
         } catch (...) {
             std::throw_with_nested(std::invalid_argument(std::string("Could not set priority: ") + err));
         }
     }
-    gnutls_priority_t get_priority() const {
-        return _priority.get();
-    }
-
     void set_dn_verification_callback(dn_callback cb) {
         _dn_callback = std::move(cb);
     }
@@ -410,9 +273,7 @@ private:
         });
     }
 
-    gnutls_certificate_credentials_t _creds;
     std::unique_ptr<tls::dh_params::impl> _dh_params;
-    std::unique_ptr<std::remove_pointer_t<gnutls_priority_t>, void(*)(gnutls_priority_t)> _priority;
     client_auth _client_auth = client_auth::NONE;
     bool _load_system_trust = false;
     semaphore _system_trust_sem {1};
@@ -495,9 +356,6 @@ void tls::certificate_credentials::set_dn_verification_callback(dn_callback cb) 
 }
 
 tls::server_credentials::server_credentials()
-#if GNUTLS_VERSION_NUMBER < 0x030600
-    : server_credentials(dh_params{})
-#endif
 {}
 
 tls::server_credentials::server_credentials(shared_ptr<dh_params> dh)
@@ -969,7 +827,7 @@ class session : public enable_lw_shared_from_this<session> {
 public:
     enum class type
         : uint32_t {
-            CLIENT = GNUTLS_CLIENT, SERVER = GNUTLS_SERVER,
+            CLIENT = 0, SERVER = 1,
     };
 
     session(type t, shared_ptr<tls::certificate_credentials> creds,
@@ -977,47 +835,7 @@ public:
             : _type(t), _sock(std::move(sock)), _creds(creds->_impl), _hostname(
                     std::move(name)), _in(_sock->source()), _out(_sock->sink()),
                     _in_sem(1), _out_sem(1), _output_pending(
-                    make_ready_future<>()), _session([t] {
-                gnutls_session_t session;
-                gtls_chk(gnutls_init(&session, GNUTLS_NONBLOCK|uint32_t(t)));
-                return session;
-            }(), &gnutls_deinit) {
-        gtls_chk(gnutls_set_default_priority(*this));
-        gtls_chk(
-                gnutls_credentials_set(*this, GNUTLS_CRD_CERTIFICATE,
-                        *_creds));
-        if (_type == type::SERVER) {
-            switch (_creds->get_client_auth()) {
-                case client_auth::NONE:
-                default:
-                    gnutls_certificate_server_set_request(*this, GNUTLS_CERT_IGNORE);
-                    break;
-                case client_auth::REQUEST:
-                    gnutls_certificate_server_set_request(*this, GNUTLS_CERT_REQUEST);
-                    break;
-                case client_auth::REQUIRE:
-                    gnutls_certificate_server_set_request(*this, GNUTLS_CERT_REQUIRE);
-                    break;
-            }
-        }
-
-        auto prio = _creds->get_priority();
-        if (prio) {
-            gtls_chk(gnutls_priority_set(*this, prio));
-        }
-
-        gnutls_transport_set_ptr(*this, this);
-        gnutls_transport_set_vec_push_function(*this, &vec_push_wrapper);
-        gnutls_transport_set_pull_function(*this, &pull_wrapper);
-
-        // This would be nice, because we preferably want verification to
-        // abort hand shake so peer immediately knows we bailed...
-#if GNUTLS_VERSION_NUMBER >= 0x030406
-        if (_type == type::CLIENT) {
-            gnutls_session_set_verify_function(*this, &verify_wrapper);
-        }
-#endif
-    }
+                    make_ready_future<>()) { }
     session(type t, shared_ptr<certificate_credentials> creds,
             connected_socket sock, sstring name = { })
             : session(t, std::move(creds), net::get_impl::get(std::move(sock)),
@@ -1030,61 +848,11 @@ public:
 
     typedef temporary_buffer<char> buf_type;
 
-    sstring cert_status_to_string(gnutls_certificate_type_t type, unsigned int status) {
-        gnutls_datum_t out;
-        gtls_chk(
-                gnutls_certificate_verification_status_print(status, type, &out,
-                        0));
-        sstring s(reinterpret_cast<const char *>(out.data), out.size);
-        gnutls_free(out.data);
-        return s;
-    }
     future<> do_handshake() {
         if (_connected) {
             return make_ready_future<>();
         }
-        if (_type == type::CLIENT && !_hostname.empty()) {
-            gnutls_server_name_set(*this, GNUTLS_NAME_DNS, _hostname.data(), _hostname.size());
-        }
-        try {
-            auto res = gnutls_handshake(*this);
-            if (res < 0) {
-                switch (res) {
-                case GNUTLS_E_AGAIN:
-                    // #453 always wait for output first.
-                    // If none is pending, it should be a no-op
-                {
-                    int dir = gnutls_record_get_direction(*this);
-                    return wait_for_output().then([this, dir] {
-                        // we actually E_AGAIN:ed in a write. Don't
-                        // wait for input.
-                        if (dir == 1) {
-                            return do_handshake();
-                        }
-                        return wait_for_input().then([this] {
-                            return do_handshake();
-                        });
-                    });
-                }
-                case GNUTLS_E_NO_CERTIFICATE_FOUND:
-                    return make_exception_future<>(verification_error("No certificate was found"));
-#if GNUTLS_VERSION_NUMBER >= 0x030406
-                case GNUTLS_E_CERTIFICATE_ERROR:
-                    verify(); // should throw. otherwise, fallthrough
-#endif
-                default:
-                    return make_exception_future<>(std::system_error(res, glts_errorc));
-                }
-            }
-            if (_type == type::CLIENT || _creds->get_client_auth() != client_auth::NONE) {
-                verify();
-            }
-            _connected = true;
-            // make sure we reset output_pending
-            return wait_for_output();
-        } catch (...) {
-            return make_exception_future<>(std::current_exception());
-        }
+        return wait_for_output();
     }
     future<> handshake() {
         // maybe load system certificates before handshake, in case we
@@ -1127,77 +895,7 @@ public:
         });
     }
 
-    static session * from_transport_ptr(gnutls_transport_ptr_t ptr) {
-        return static_cast<session *>(ptr);
-    }
-#if GNUTLS_VERSION_NUMBER >= 0x030406
-    static int verify_wrapper(gnutls_session_t gs) {
-        try {
-            from_transport_ptr(gnutls_transport_get_ptr(gs))->verify();
-            return 0;
-        } catch (...) {
-            return GNUTLS_E_CERTIFICATE_ERROR;
-        }
-    }
-#endif
-    static ssize_t vec_push_wrapper(gnutls_transport_ptr_t ptr, const giovec_t * iov, int iovcnt) {
-        return from_transport_ptr(ptr)->vec_push(iov, iovcnt);
-    }
-    static ssize_t pull_wrapper(gnutls_transport_ptr_t ptr, void* dst, size_t len) {
-        return from_transport_ptr(ptr)->pull(dst, len);
-    }
-
     void verify() {
-        unsigned int status;
-        auto res = gnutls_certificate_verify_peers3(*this, _type != type::CLIENT || _hostname.empty()
-                        ? nullptr : _hostname.c_str(), &status);
-        if (res == GNUTLS_E_NO_CERTIFICATE_FOUND && _type != type::CLIENT && _creds->get_client_auth() != client_auth::REQUIRE) {
-            return;
-        }
-        if (res < 0) {
-            throw std::system_error(res, glts_errorc);
-        }
-        if (status & GNUTLS_CERT_INVALID) {
-            throw verification_error(
-                    cert_status_to_string(gnutls_certificate_type_get(*this),
-                            status));
-        }
-        if (_creds->_dn_callback) {
-            // if the user registered a DN (Distinguished Name) callback
-            // then extract subject and issuer from the (leaf) peer certificate and invoke the callback
-
-            unsigned int list_size;
-            const gnutls_datum_t* client_cert_list = gnutls_certificate_get_peers(*this, &list_size);
-            assert(list_size > 0); // otherwise we couldn't have gotten here
-
-            gnutls_x509_crt_t peer_leaf_cert;
-            gtls_chk(gnutls_x509_crt_init(&peer_leaf_cert));
-            gtls_chk(gnutls_x509_crt_import(peer_leaf_cert, &(client_cert_list[0]), GNUTLS_X509_FMT_DER));
-
-            // we need get_string to be noexcept because we need to manually de-init peer_leaf_cert afterwards
-            auto [ec, subject] = get_gtls_string(gnutls_x509_crt_get_dn, peer_leaf_cert);
-            auto [ec2, issuer] = get_gtls_string(gnutls_x509_crt_get_issuer_dn, peer_leaf_cert);
-
-            gnutls_x509_crt_deinit(peer_leaf_cert);
-
-            if (ec || ec2) {
-                throw std::runtime_error("error while extracting certificate DN strings");
-            }
-
-            // a switch here might look overelaborate, however,
-            // the compiler will warn us if someone alters the definition of type
-            session_type t;
-            switch (_type) {
-            case type::CLIENT:
-                t = session_type::CLIENT;
-                break;
-            case type::SERVER:
-                t = session_type::SERVER;
-                break;
-            }
-
-            _creds->_dn_callback(t, std::move(subject), std::move(issuer));
-        }
     }
 
     future<temporary_buffer<char>> get() {
@@ -1225,44 +923,6 @@ public:
     }
 
     future<temporary_buffer<char>> do_get() {
-        // gnutls might have stuff in its buffers.
-        auto avail = gnutls_record_check_pending(*this);
-        if (avail == 0) {
-            // or we might...
-            avail = in_avail();
-        }
-        if (avail != 0) {
-            // typically, unencrypted data can get smaller (padding),
-            // but not larger.
-            temporary_buffer<char> buf(avail);
-            auto n = gnutls_record_recv(*this, buf.get_write(), buf.size());
-            if (n < 0) {
-                switch (n) {
-                case GNUTLS_E_AGAIN:
-                    // Assume we got this because we read to little underlying
-                    // data to finish a tls packet
-                    // Our input buffer should be empty now, so just go again
-                    return do_get();
-                case GNUTLS_E_REHANDSHAKE:
-                    // server requests new HS. must release semaphore, so set new state
-                    // and return nada.
-                    _connected = false;
-                    return make_ready_future<temporary_buffer<char>>();
-                default:
-                    _error = std::make_exception_ptr(std::system_error(n, glts_errorc));
-                    return make_exception_future<temporary_buffer<char>>(_error);
-                }
-            }
-            buf.trim(n);
-            if (n == 0) {
-                _eof = true;
-            }
-            return make_ready_future<temporary_buffer<char>>(std::move(buf));
-        }
-        if (eof()) {
-            return make_ready_future<temporary_buffer<char>>();
-        }
-        // No input? wait for out buffers to fill...
         return wait_for_input().then([this] {
             return do_get();
         });
@@ -1272,25 +932,7 @@ public:
 
     future<> do_put(frag_iter i, frag_iter e) {
         assert(_output_pending.available());
-        return do_for_each(i, e, [this](net::fragment& f) {
-            auto ptr = f.base;
-            auto size = f.size;
-            size_t off = 0; // here to appease eclipse cdt
-            return repeat([this, ptr, size, off]() mutable {
-                if (off == size) {
-                    return make_ready_future<stop_iteration>(stop_iteration::yes);
-                }
-                auto res = gnutls_record_send(*this, ptr + off, size - off);
-                if (res > 0) { // don't really need to check, but...
-                    off += res;
-                }
-                // what will we wait for? error or results...
-                auto f = res < 0 ? handle_output_error(res) : wait_for_output();
-                return f.then([] {
-                    return make_ready_future<stop_iteration>(stop_iteration::no);
-                });
-            });
-        });
+        return do_for_each(i, e, [this](net::fragment& f) {});
     }
     future<> put(net::packet p) {
         if (_error) {
@@ -1310,42 +952,7 @@ public:
     }
 
     ssize_t pull(void* dst, size_t len) {
-        if (eof()) {
-            return 0;
-        }
-        // If we have data in buffers, we can complete.
-        // Otherwise, we must be conservative.
-        if (_input.empty()) {
-            gnutls_transport_set_errno(*this, EAGAIN);
-            return -1;
-        }
-        auto n = std::min(len, _input.size());
-        memcpy(dst, _input.get(), n);
-        _input.trim_front(n);
-        return n;
-    }
-    ssize_t vec_push(const giovec_t * iov, int iovcnt) {
-        if (!_output_pending.available()) {
-            gnutls_transport_set_errno(*this, EAGAIN);
-            return -1;
-        }
-        try {
-            scattered_message<char> msg;
-            for (int i = 0; i < iovcnt; ++i) {
-                msg.append(std::string_view(reinterpret_cast<const char *>(iov[i].iov_base), iov[i].iov_len));
-            }
-            auto n = msg.size();
-            _output_pending = _out.put(std::move(msg).release());
-            return n;
-        } catch (...) {
-            gnutls_transport_set_errno(*this, EIO);
-            _output_pending = make_exception_future<>(std::current_exception());
-        }
-        return -1;
-    }
-
-    operator gnutls_session_t() const {
-        return _session.get();
+        return 0;
     }
 
     future<>
@@ -1373,20 +980,6 @@ public:
     future<> do_shutdown() {
         if (_error || !_connected) {
             return make_ready_future();
-        }
-        auto res = gnutls_bye(*this, GNUTLS_SHUT_WR);
-        if (res < 0) {
-            switch (res) {
-            case GNUTLS_E_AGAIN:
-                // We only send "bye" alert, letting a "normal" (either pending, or subsequent)
-                // read deal with reading the expected EOF alert.
-                assert(gnutls_record_get_direction(*this) == 1);
-                return wait_for_output().then([this] {
-                    return do_shutdown();
-                });
-            default:
-                return handle_output_error(res);
-            }
         }
         return wait_for_output();
     }
@@ -1480,9 +1073,6 @@ private:
 
     future<> _output_pending;
     buf_type _input;
-
-    // modify this to a unique_ptr to handle exceptions in our constructor.
-    std::unique_ptr<std::remove_pointer_t<gnutls_session_t>, void(*)(gnutls_session_t)> _session;
 };
 
 struct session::session_ref {

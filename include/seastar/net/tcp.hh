@@ -41,8 +41,9 @@
 #include <stdexcept>
 #include <system_error>
 
-#define CRYPTOPP_ENABLE_NAMESPACE_WEAK 1
-#include <cryptopp/md5.h>
+// TP FIXME
+// #define CRYPTOPP_ENABLE_NAMESPACE_WEAK 1
+// #include <cryptopp/md5.h>
 
 namespace seastar {
 
@@ -2062,7 +2063,8 @@ tcp_seq tcp<InetTraits>::tcb::get_isn() {
     hash[1] = _foreign_ip.ip;
     hash[2] = (_local_port << 16) + _foreign_port;
     hash[3] = _isn_secret.key[15];
-    CryptoPP::Weak::MD5::Transform(hash, _isn_secret.key);
+    // TP FIXME
+    // CryptoPP::Weak::MD5::Transform(hash, _isn_secret.key);
     auto seq = hash[0];
     auto m = duration_cast<microseconds>(clock_type::now().time_since_epoch());
     seq += m.count() / 4;
